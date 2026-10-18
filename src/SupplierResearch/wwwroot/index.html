@@ -35,7 +35,7 @@
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      status.textContent = 'Searching…';
+      status.textContent = 'Searching...';
       results.replaceChildren();
       try {
         const response = await fetch('/api/research', {
@@ -48,7 +48,40 @@
 
         status.textContent = data.mode === 'fixture'
           ? 'TEST FIXTURE: these are placeholders; no live supplier research was performed.'
-          : `Live search returned ${data.sources.length} source(s).`;
+          : data.status === 'complete'
+            ? `Live research returned ${data.findings.length} evidence-backed finding(s) from ${data.sources.length} source(s).`
+            : `Live search returned ${data.sources.length} source(s); findings are ${data.status.replaceAll('_', ' ')}.`;
+        for (const warning of data.warnings) {
+          const notice = document.createElement('p');
+          notice.className = 'notice';
+          notice.textContent = warning;
+          results.append(notice);
+        }
+        for (const finding of data.findings) {
+          const card = document.createElement('article');
+          const text = document.createElement('p');
+          text.textContent = finding.text;
+          card.append(text);
+          for (const evidence of finding.evidence) {
+            const citation = document.createElement('blockquote');
+            citation.textContent = `${evidence.sourceId}: “${evidence.excerptSpan}”`;
+            card.append(citation);
+          }
+          results.append(card);
+        }
+        if (data.followUpQuestions.length > 0) {
+          const followUps = document.createElement('section');
+          const heading = document.createElement('h2');
+          const list = document.createElement('ul');
+          heading.textContent = 'Suggested follow-up questions';
+          for (const question of data.followUpQuestions) {
+            const item = document.createElement('li');
+            item.textContent = question;
+            list.append(item);
+          }
+          followUps.append(heading, list);
+          results.append(followUps);
+        }
         for (const source of data.sources) {
           const card = document.createElement('article');
           const heading = document.createElement('h2');
@@ -61,7 +94,7 @@
           link.target = '_blank';
           excerpt.textContent = source.excerpt;
           provenance.className = 'provenance';
-          provenance.textContent = `${source.id} · ${source.provenance}`;
+          provenance.textContent = `${source.id} | ${source.provenance}`;
           heading.append(link);
           card.append(heading, excerpt, provenance);
           results.append(card);

@@ -26,6 +26,11 @@ else
 }
 
 builder.Services.AddSingleton<SupplierSearchService>();
+builder.Services.AddHttpClient<IResearchGenerator, GeminiResearchGenerator>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+builder.Services.AddScoped<ResearchWorkflow>();
 
 var app = builder.Build();
 app.UseDefaultFiles();
@@ -35,8 +40,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
 app.MapPost("/api/research", async Task<IResult> (
     ResearchRequest request,
-    SupplierSearchService service,
-    ISupplierSearchProvider provider,
+    ResearchWorkflow workflow,
     CancellationToken cancellationToken) =>
 {
     var supplier = request.Supplier?.Trim();
@@ -52,8 +56,8 @@ app.MapPost("/api/research", async Task<IResult> (
 
     try
     {
-        var sources = await service.SearchAsync(supplier, question, cancellationToken);
-        return Results.Ok(new ResearchResponse(supplier, question, provider.Mode, sources));
+        var result = await workflow.ResearchAsync(supplier, question, cancellationToken);
+        return Results.Ok(result);
     }
     catch (ProviderSearchException ex) when (ex.Kind == ProviderFailureKind.Cancelled)
     {

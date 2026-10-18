@@ -6,7 +6,6 @@ using System.Text.RegularExpressions;
 namespace SupplierResearch;
 
 public sealed record ResearchRequest(string? Supplier, string? Question);
-public sealed record ResearchResponse(string Supplier, string Question, string Mode, IReadOnlyList<ResearchSource> Sources);
 public sealed record ResearchSource(string Id, string Title, string Url, string Excerpt, string Provenance);
 public sealed record ProviderSearchResult(string Title, string Url, string Content);
 
@@ -39,6 +38,8 @@ public sealed class SupplierSearchService(ISupplierSearchProvider provider)
     private const int MaxSources = 5;
     private const int MaxExcerptLength = 2_000;
     private const int MaxTotalExcerptLength = 10_000;
+
+    public string Mode => provider.Mode;
 
     public async Task<IReadOnlyList<ResearchSource>> SearchAsync(
         string supplier, string question, CancellationToken cancellationToken)
