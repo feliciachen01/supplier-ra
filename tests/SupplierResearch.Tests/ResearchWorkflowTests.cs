@@ -10,13 +10,29 @@ namespace SupplierResearch.Tests;
 public sealed class ResearchWorkflowTests
 {
     [Fact]
-    public async Task ResearchAsync_returns_findings_with_matching_source_spans()
+    public async Task ResearchAsync_returns_one_clear_supported_claim()
+    {
+        var generator = new StubGenerator(new GeneratedResearch(new GeneratedAnswer(
+            [new GeneratedFinding("The supplier reports recyclable packaging.",
+                [new GeneratedEvidence("S1", "recyclable packaging")])], []), "gemini-test", null));
+
+        var result = await CreateWorkflow([Source()], "live", generator)
+            .ResearchAsync("Northwind", "Find packaging information", CancellationToken.None);
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("complete", result.Status);
+        Assert.Contains("recyclable packaging", finding.Text);
+        Assert.Contains(finding.Evidence[0].ExcerptSpan, result.Sources[0].Excerpt);
+    }
+
+    [Fact]
+    public async Task ResearchAsync_separates_supported_finding_from_missing_context_follow_up()
     {
         var generator = new StubGenerator(new GeneratedResearch(
             new GeneratedAnswer(
                 [new GeneratedFinding("The supplier reports recyclable packaging.",
                     [new GeneratedEvidence("S1", "recyclable packaging")])],
-                ["Which packaging lines use recycled materials?"]),
+                ["What reporting period applies to the recyclable-packaging statement?"]),
             "gemini-test", new ProviderUsage(10, 12, 22)));
 
         var result = await CreateWorkflow([Source()], "live", generator)
@@ -26,7 +42,74 @@ public sealed class ResearchWorkflowTests
         Assert.Equal("gemini-test", result.Model);
         Assert.Equal(22, result.Usage!.TotalTokenCount);
         Assert.Equal("S1", Assert.Single(Assert.Single(result.Findings).Evidence).SourceId);
-        Assert.Equal("Which packaging lines use recycled materials?", Assert.Single(result.FollowUpQuestions));
+        Assert.Equal("What reporting period applies to the recyclable-packaging statement?", Assert.Single(result.FollowUpQuestions));
+    }
+
+    [Fact]
+    public async Task ResearchAsync_returns_multiple_separately_supported_claims()
+    {
+        ProviderSearchResult[] providerResults =
+        [
+            new("Materials", "https://example.test/materials", "The supplier reports that its cartons use plant-based polymers."),
+            new("Emissions", "https://example.test/emissions", "The supplier states that factory energy use fell by 12 percent last year.")
+        ];
+        var generator = new StubGenerator(new GeneratedResearch(
+            new GeneratedAnswer(
+            [
+                new GeneratedFinding("The cartons use plant-based polymers.",
+                    [new GeneratedEvidence("S1", "cartons use plant-based polymers")]),
+                new GeneratedFinding("Factory energy use fell by 12 percent last year.",
+                    [new GeneratedEvidence("S2", "factory energy use fell by 12 percent last year")])
+            ], []), "gemini-test", null));
+
+        var result = await CreateWorkflow(providerResults, "live", generator)
+            .ResearchAsync("Northwind", "Find materials and energy information", CancellationToken.None);
+
+        Assert.Equal("complete", result.Status);
+        Assert.Equal(2, result.Findings.Count);
+        Assert.Equal("S1", Assert.Single(result.Findings[0].Evidence).SourceId);
+        Assert.Contains("plant-based polymers", result.Sources[0].Excerpt);
+        Assert.Equal("S2", Assert.Single(result.Findings[1].Evidence).SourceId);
+        Assert.Contains("12 percent last year", result.Sources[1].Excerpt);
+    }
+
+    [Fact]
+    public async Task ResearchAsync_abstains_when_sources_do_not_support_a_finding()
+    {
+        var generator = new StubGenerator(new GeneratedResearch(new GeneratedAnswer([], []), "gemini-test", null));
+        var result = await CreateWorkflow([Source()], "live", generator)
+            .ResearchAsync("Northwind", "Find a verified facility count", CancellationToken.None);
+
+        Assert.Equal("insufficient_evidence", result.Status);
+        Assert.Empty(result.Findings);
+        Assert.Single(result.Sources);
+    }
+
+    [Fact]
+    public async Task ResearchAsync_keeps_conflicting_claims_separately_attributed()
+    {
+        ProviderSearchResult[] providerResults =
+        [
+            new("Supplier statement", "https://example.test/supplier", "The supplier reports a 30 percent reduction in packaging waste."),
+            new("Independent review", "https://example.test/review", "The review says no packaging-waste reduction was measured for the same period.")
+        ];
+        var generator = new StubGenerator(new GeneratedResearch(new GeneratedAnswer(
+        [
+            new GeneratedFinding("The supplier reports a 30 percent packaging-waste reduction.",
+                [new GeneratedEvidence("S1", "30 percent reduction in packaging waste")]),
+            new GeneratedFinding("A review says no reduction was measured; these sources conflict.",
+                [new GeneratedEvidence("S2", "no packaging-waste reduction was measured for the same period")])
+        ], []), "gemini-test", null));
+
+        var result = await CreateWorkflow(providerResults, "live", generator)
+            .ResearchAsync("Northwind", "Compare packaging-waste claims", CancellationToken.None);
+
+        Assert.Equal("complete", result.Status);
+        Assert.Equal(2, result.Findings.Count);
+        Assert.Equal("S1", Assert.Single(result.Findings[0].Evidence).SourceId);
+        Assert.Equal("S2", Assert.Single(result.Findings[1].Evidence).SourceId);
+        Assert.Contains("supplier reports", result.Findings[0].Text);
+        Assert.Contains("sources conflict", result.Findings[1].Text);
     }
 
     [Fact]
@@ -75,6 +158,18 @@ public sealed class ResearchWorkflowTests
         Assert.Empty(result.Findings);
         Assert.Single(result.Sources);
         Assert.Null(result.Model);
+    }
+
+    [Fact]
+    public async Task ResearchAsync_returns_sources_only_when_generation_times_out()
+    {
+        var generator = new StubGenerator(new ResearchGenerationException(GenerationFailureKind.Timeout));
+        var result = await CreateWorkflow([Source()], "live", generator)
+            .ResearchAsync("Northwind", "Find packaging information", CancellationToken.None);
+
+        Assert.Equal("sources_only", result.Status);
+        Assert.Empty(result.Findings);
+        Assert.Single(result.Sources);
     }
 
     [Fact]
@@ -149,6 +244,7 @@ public sealed class ResearchWorkflowTests
         var instruction = payload.RootElement.GetProperty("systemInstruction").GetProperty("parts")[0]
             .GetProperty("text").GetString();
         Assert.Contains("never copy the full source excerpt", instruction);
+        Assert.Contains("If excerpts conflict, report the claims separately", instruction);
         Assert.Equal("gemini-test-version", response.Model);
         Assert.Equal(12, response.Usage!.TotalTokenCount);
     }

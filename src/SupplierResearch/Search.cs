@@ -103,6 +103,14 @@ public sealed class FixtureSearchProvider : ISupplierSearchProvider
     }
 }
 
+public sealed class DisabledSearchProvider : ISupplierSearchProvider
+{
+    public string Mode => "disabled";
+
+    public Task<IReadOnlyList<ProviderSearchResult>> SearchAsync(string query, CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("Live search is disabled by configuration.");
+}
+
 public sealed class TavilySearchProvider(
     HttpClient client,
     IConfiguration configuration,

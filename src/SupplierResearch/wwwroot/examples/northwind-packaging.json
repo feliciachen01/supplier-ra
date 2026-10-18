@@ -1,0 +1,40 @@
+{
+  "presetId": "northwind-packaging",
+  "capturedAt": "2026-10-17T00:00:00Z",
+  "mode": "saved_example",
+  "notice": "Illustrative saved example with synthetic content. It is not live supplier research.",
+  "research": {
+    "supplier": "Northwind Packaging",
+    "question": "Find public company and sustainability information",
+    "mode": "saved_example",
+    "status": "complete",
+    "findings": [
+      {
+        "text": "Example only: the synthetic excerpt describes recyclable materials.",
+        "evidence": [
+          {
+            "sourceId": "S1",
+            "excerptSpan": "SYNTHETIC EXAMPLE: recyclable materials are used in this sample package."
+          }
+        ]
+      }
+    ],
+    "followUpQuestions": [
+      "What reporting period does this illustrative example cover?"
+    ],
+    "sources": [
+      {
+        "id": "S1",
+        "title": "Synthetic saved example source",
+        "url": "https://example.test/saved-example",
+        "excerpt": "SYNTHETIC EXAMPLE: recyclable materials are used in this sample package.",
+        "provenance": "saved_example"
+      }
+    ],
+    "warnings": [
+      "Synthetic saved example; not a verified company claim or live research."
+    ],
+    "model": null,
+    "usage": null
+  }
+}

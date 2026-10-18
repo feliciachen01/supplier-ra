@@ -18,91 +18,180 @@
   <main>
     <h1>Supplier Research</h1>
     <p>Search public supplier information. Results are provider excerpts, not independently verified pages.</p>
-    <form id="search-form">
+    <form id="search-form" hidden>
       <label for="supplier">Supplier</label>
       <input id="supplier" name="supplier" minlength="2" maxlength="120" required>
       <label for="question">What would you like to find?</label>
       <textarea id="question" name="question" minlength="10" maxlength="500" required></textarea>
       <button type="submit">Search sources</button>
     </form>
+    <form id="demo-form" hidden>
+      <label for="preset">Public research preset</label>
+      <select id="preset" required></select>
+      <button type="submit">Run preset</button>
+      <p id="live-state" class="notice"></p>
+    </form>
+    <section aria-label="Saved examples">
+      <h2>Saved examples</h2>
+      <p>These are labeled snapshots and are not substituted for live results.</p>
+      <button id="load-example" type="button">View Northwind illustrative example</button>
+    </section>
     <p id="status" role="status" aria-live="polite"></p>
     <section id="results" aria-label="Search sources"></section>
   </main>
   <script>
-    const form = document.querySelector('#search-form');
-    const status = document.querySelector('#status');
-    const results = document.querySelector('#results');
+  const form = document.querySelector('#search-form');
+  const demoForm = document.querySelector('#demo-form');
+  const presetSelect = document.querySelector('#preset');
+  const liveState = document.querySelector('#live-state');
+  const status = document.querySelector('#status');
+  const results = document.querySelector('#results');
 
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      status.textContent = 'Searching...';
-      results.replaceChildren();
-      try {
-        const response = await fetch('/api/research', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ supplier: form.supplier.value, question: form.question.value })
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.title || 'Search failed.');
-
-        status.textContent = data.mode === 'fixture'
-          ? 'TEST FIXTURE: these are placeholders; no live supplier research was performed.'
-          : data.status === 'complete'
-            ? `Live research returned ${data.findings.length} evidence-backed finding(s) from ${data.sources.length} source(s).`
-            : `Live search returned ${data.sources.length} source(s); findings are ${data.status.replaceAll('_', ' ')}.`;
-        for (const warning of data.warnings) {
-          const notice = document.createElement('p');
-          notice.className = 'notice';
-          notice.textContent = warning;
-          results.append(notice);
-        }
-        for (const finding of data.findings) {
-          const card = document.createElement('article');
-          const text = document.createElement('p');
-          text.textContent = finding.text;
-          card.append(text);
-          for (const evidence of finding.evidence) {
-            const citation = document.createElement('blockquote');
-            citation.textContent = `${evidence.sourceId}: “${evidence.excerptSpan}”`;
-            card.append(citation);
-          }
-          results.append(card);
-        }
-        if (data.followUpQuestions.length > 0) {
-          const followUps = document.createElement('section');
-          const heading = document.createElement('h2');
-          const list = document.createElement('ul');
-          heading.textContent = 'Suggested follow-up questions';
-          for (const question of data.followUpQuestions) {
-            const item = document.createElement('li');
-            item.textContent = question;
-            list.append(item);
-          }
-          followUps.append(heading, list);
-          results.append(followUps);
-        }
-        for (const source of data.sources) {
-          const card = document.createElement('article');
-          const heading = document.createElement('h2');
-          const link = document.createElement('a');
-          const excerpt = document.createElement('p');
-          const provenance = document.createElement('p');
-          link.textContent = source.title;
-          link.href = source.url;
-          link.rel = 'noopener noreferrer';
-          link.target = '_blank';
-          excerpt.textContent = source.excerpt;
-          provenance.className = 'provenance';
-          provenance.textContent = `${source.id} | ${source.provenance}`;
-          heading.append(link);
-          card.append(heading, excerpt, provenance);
-          results.append(card);
-        }
-      } catch (error) {
-        status.textContent = error instanceof Error ? error.message : 'Search failed.';
+  async function request(url, options = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 35000);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.title || 'Request failed.');
+      return data;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new Error('The request exceeded the 35-second browser deadline.');
       }
-    });
-  </script>
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function showResearch(data, savedNotice = null) {
+    results.replaceChildren();
+    if (savedNotice) {
+      const notice = document.createElement('p');
+      notice.className = 'notice';
+      notice.textContent = savedNotice;
+      results.append(notice);
+    }
+    status.textContent = data.mode === 'fixture'
+      ? 'TEST FIXTURE: placeholders only; no live research was performed.'
+      : data.mode === 'saved_example'
+        ? `SAVED EXAMPLE: captured ${data.capturedAt}. This snapshot is not live research.`
+        : data.status === 'complete'
+          ? `Live research returned ${data.findings.length} finding(s) from ${data.sources.length} provider excerpts.`
+          : `Live search returned ${data.sources.length} provider excerpt(s); status: ${data.status.replaceAll('_', ' ')}.`;
+
+    for (const warning of data.warnings || []) {
+      const notice = document.createElement('p');
+      notice.className = 'notice';
+      notice.textContent = warning;
+      results.append(notice);
+    }
+    for (const finding of data.findings || []) {
+      const card = document.createElement('article');
+      const text = document.createElement('p');
+      text.textContent = finding.text;
+      card.append(text);
+      for (const evidence of finding.evidence || []) {
+        const citation = document.createElement('blockquote');
+        citation.textContent = `${evidence.sourceId}: "${evidence.excerptSpan}"`;
+        card.append(citation);
+      }
+      results.append(card);
+    }
+    if (data.followUpQuestions && data.followUpQuestions.length > 0) {
+      const followUps = document.createElement('section');
+      const heading = document.createElement('h2');
+      const list = document.createElement('ul');
+      heading.textContent = 'Suggested follow-up questions';
+      for (const question of data.followUpQuestions) {
+        const item = document.createElement('li');
+        item.textContent = question;
+        list.append(item);
+      }
+      followUps.append(heading, list);
+      results.append(followUps);
+    }
+    if (data.model) {
+      const model = document.createElement('p');
+      model.className = 'provenance';
+      model.textContent = `Generation model: ${data.model}`;
+      results.append(model);
+    }
+    for (const source of data.sources || []) {
+      const card = document.createElement('article');
+      const heading = document.createElement('h2');
+      const excerpt = document.createElement('p');
+      const provenance = document.createElement('p');
+      const parsedUrl = new URL(source.url, window.location.origin);
+      if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
+        const link = document.createElement('a');
+        link.textContent = source.title;
+        link.href = parsedUrl.href;
+        link.rel = 'noopener noreferrer';
+        link.target = '_blank';
+        heading.append(link);
+      } else {
+        heading.textContent = source.title;
+      }
+      excerpt.textContent = source.excerpt;
+      provenance.className = 'provenance';
+      provenance.textContent = `${source.id} | ${source.provenance}`;
+      card.append(heading, excerpt, provenance);
+      results.append(card);
+    }
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    status.textContent = 'Searching...';
+    try {
+      const data = await request('/api/research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ supplier: form.supplier.value, question: form.question.value })
+      });
+      showResearch(data);
+    } catch (error) {
+      status.textContent = error instanceof Error ? error.message : 'Search failed.';
+    }
+  });
+
+  demoForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    status.textContent = 'Running server-defined preset...';
+    try {
+      showResearch(await request(`/api/demo/${encodeURIComponent(presetSelect.value)}`, { method: 'POST' }));
+    } catch (error) {
+      status.textContent = error instanceof Error ? error.message : 'Preset request failed.';
+    }
+  });
+
+  document.querySelector('#load-example').addEventListener('click', async () => {
+    status.textContent = 'Loading saved example...';
+    try {
+      const saved = await request('/api/examples/northwind-packaging');
+      showResearch({ ...saved.research, mode: saved.mode, capturedAt: saved.capturedAt }, saved.notice);
+    } catch (error) {
+      status.textContent = error instanceof Error ? error.message : 'Saved example unavailable.';
+    }
+  });
+
+  request('/api/demo/presets').then((config) => {
+    form.hidden = !config.localArbitraryQueries;
+    demoForm.hidden = config.mode !== 'hosted';
+    liveState.textContent = config.liveEnabled
+      ? 'Only server-defined presets can make live provider requests.'
+      : 'Hosted live research is disabled. Use a clearly labeled saved example.';
+    for (const preset of config.presets) {
+      const option = document.createElement('option');
+      option.value = preset.id;
+      option.textContent = preset.label;
+      presetSelect.append(option);
+    }
+  }).catch(() => {
+    status.textContent = 'Application mode is unavailable; live actions are disabled.';
+  });
+</script>
 </body>
 </html>
