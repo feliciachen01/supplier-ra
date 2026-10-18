@@ -55,6 +55,24 @@ app.MapPost("/api/research", async Task<IResult> (
         var sources = await service.SearchAsync(supplier, question, cancellationToken);
         return Results.Ok(new ResearchResponse(supplier, question, provider.Mode, sources));
     }
+    catch (ProviderSearchException ex) when (ex.Kind == ProviderFailureKind.Cancelled)
+    {
+        throw new OperationCanceledException(cancellationToken);
+    }
+    catch (ProviderSearchException ex)
+    {
+        var (statusCode, title) = ex.Kind switch
+        {
+            ProviderFailureKind.UpstreamHttp => (StatusCodes.Status502BadGateway,
+                $"Search provider returned HTTP {(int)ex.StatusCode!.Value}."),
+            ProviderFailureKind.Transport => (StatusCodes.Status502BadGateway,
+                "Could not connect to the search provider."),
+            ProviderFailureKind.Timeout => (StatusCodes.Status504GatewayTimeout,
+                "Search provider request timed out."),
+            _ => (StatusCodes.Status502BadGateway, "Search provider request failed.")
+        };
+        return Results.Problem(statusCode: statusCode, title: title);
+    }
     catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
     {
         return Results.Problem(statusCode: StatusCodes.Status504GatewayTimeout, title: "Search timed out.");
