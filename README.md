@@ -31,12 +31,14 @@ The single GitHub Actions workflow runs the test suite and builds the image on p
 
 ## Manual Azure deployment
 
-The existing app is `sra-m0-quickstart-20261017` in resource group `rg-supplier-ra-m0-20261017` (Canada Central). Keep its current min/max replica settings (0/1). No other Azure resources are required. A successful `main` workflow publishes the commit-tagged image to a **private** GitHub Container Registry package linked to this repository. Azure needs a GitHub classic PAT with `read:packages` to pull that private image. Configure that credential in the Container App's Registries settings without putting the token in a command, file, or chat. Then update the existing app to the reviewed image:
+The existing app is `sra-m0-quickstart-20261017` in resource group `rg-supplier-ra-m0-20261017` (Canada Central). Keep its current min/max replica settings (0/1). No other Azure resources are required. The verified image is the private GHCR digest below. The Container App has a registry entry pointing at its existing secret `ghcrio-feliciachen01`; Azure must be able to use a GitHub classic PAT with `read:packages` and access to this package. Never place the token in a command, file, or chat.
 
 ```powershell
-$image = 'ghcr.io/feliciachen01/supplier-ra:83e2aa1282f58749768971b889b2b1d7dfb332bc'
+$image = 'ghcr.io/feliciachen01/supplier-ra@sha256:670f6bb71518f48ceeb3ff10a96d7d691bc249d1045658f21d75f3f21a82223b'
 & 'C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd' containerapp update --resource-group rg-supplier-ra-m0-20261017 --name sra-m0-quickstart-20261017 --image $image
 ```
+
+**Deployment status (2026-10-17): not ready.** Azure reports `BuildFailed: Authentication failed when pulling container image` for this digest. The registry entry and secret reference are present, so the remaining issue is the credential’s validity or package access; Azure does not expose enough information to distinguish those safely. The existing public hostname still returns the old quickstart page (`/health` and `/` both return 200, without the Supplier Research Assistant title). The application endpoints have therefore not been verified in Azure. Before retrying, refresh the existing Container App secret through Azure Portal with a valid, package-authorized `read:packages` token, then rerun the update and verify a ready revision. No new resources were created; the existing app remains at 0/1 replicas and hosted live calls remain disabled.
 
 Do not enable hosted live calls or add Azure/GitHub deployment automation.
 
