@@ -5,6 +5,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using UglyToad.PdfPig;
+using UglyToad.PdfPig.DocumentLayoutAnalysis.PageSegmenter;
+using UglyToad.PdfPig.DocumentLayoutAnalysis.WordExtractor;
 
 namespace SupplierResearch;
 
@@ -64,7 +66,7 @@ public sealed class EvidenceWorkspace(IWebHostEnvironment environment, ILogger<E
             {
                 using var pdf = PdfDocument.Open(new MemoryStream(bytes));
                 if (pdf.NumberOfPages > 200) throw new WorkspaceInputException("PDF exceeds the 200-page limit.");
-                extracted = pdf.GetPages().Select(page => (page.Number, page.Text.Trim()))
+                extracted = pdf.GetPages().Select(page => (page.Number, ExtractPageText(page)))
                     .Where(page => page.Item2.Length > 0).Select(page => (page.Number, page.Item2)).ToList();
             }
             catch (WorkspaceInputException) { throw; }
@@ -142,18 +144,36 @@ public sealed class EvidenceWorkspace(IWebHostEnvironment environment, ILogger<E
             }
             if (generated is not null)
             {
-                if (ResearchWorkflow.TryValidate(generated.Answer, sources, out findings, out followups, out var failure))
+                var validation = ResearchWorkflow.ValidatePdfOutput(generated.Answer, sources);
+                foreach (var rejection in validation.Rejections)
                 {
-                    status = findings.Count == 0 ? "insufficient_evidence" : "complete";
-                    if (findings.Count == 0)
-                        warnings = ["The retrieved evidence did not support a defensible answer to this question; no finding was generated."];
+                    _logger.LogWarning("PDF research validation rejected output: {Rule} {FindingIndex} {EvidenceIndex} {SourceId} {AvailableSourceIds} {ExcerptSpanLength} {SourceExcerptLength}",
+                        rejection.Rule, rejection.FindingIndex, rejection.EvidenceIndex, rejection.SourceId,
+                        rejection.AvailableSourceIds, rejection.ExcerptSpanLength, rejection.SourceExcerptLength);
+                }
+                findings = validation.Findings;
+                followups = validation.FollowUpQuestions;
+                if (validation.Fatal || validation.Rejections.Count > 0 && findings.Count == 0)
+                {
+                    findings = [];
+                    status = "sources_only";
+                    warnings = [validation.Fatal
+                        ? "Generated output failed evidence validation; retrieved passages are shown without findings."
+                        : "Generated citations failed evidence validation; retrieved passages are shown without findings."];
+                }
+                else if (validation.Rejections.Count > 0)
+                {
+                    status = "partial_validation";
+                    warnings = ["Some generated findings failed evidence validation and were omitted; remaining findings passed exact citation checks."];
+                }
+                else if (findings.Count == 0)
+                {
+                    status = "insufficient_evidence";
+                    warnings = ["The retrieved evidence did not support a defensible answer to this question; no finding was generated."];
                 }
                 else
                 {
-                    _logger.LogWarning("PDF research validation rejected output: {Rule} {FindingIndex} {EvidenceIndex} {SourceId} {AvailableSourceIds} {ExcerptSpanLength} {SourceExcerptLength}",
-                        failure!.Rule, failure.FindingIndex, failure.EvidenceIndex, failure.SourceId,
-                        failure.AvailableSourceIds, failure.ExcerptSpanLength, failure.SourceExcerptLength);
-                    findings = []; warnings = ["Generated citations failed evidence validation; retrieved passages are shown without findings."]; status = "sources_only";
+                    status = "complete";
                 }
             }
             else status = "sources_only";
@@ -198,6 +218,16 @@ public sealed class EvidenceWorkspace(IWebHostEnvironment environment, ILogger<E
     }
 
     private static string Csv(string value) => "\"" + value.Replace("\"", "\"\"").Replace("\r", " ").Replace("\n", " ") + "\"";
+    private static string ExtractPageText(UglyToad.PdfPig.Content.Page page)
+    {
+        var words = page.GetWords(NearestNeighbourWordExtractor.Instance);
+        var blocks = DocstrumBoundingBoxes.Instance.GetBlocks(words);
+        return string.Join(Environment.NewLine, blocks
+            .SelectMany(block => block.TextLines)
+            .Select(line => string.Join(" ", line.Words.Select(word => word.Text.Trim()).Where(word => word.Length > 0)))
+            .Where(line => !string.IsNullOrWhiteSpace(line))).Trim();
+    }
+
     private static IEnumerable<string> Chunk(string text)
     {
         const int size = 1200; for (var start = 0; start < text.Length; start += size)

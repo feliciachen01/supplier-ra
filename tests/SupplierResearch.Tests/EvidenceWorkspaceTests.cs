@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Logging;
 using SupplierResearch;
+using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Core;
 using UglyToad.PdfPig.Fonts.Standard14Fonts;
@@ -101,6 +103,37 @@ public sealed class EvidenceWorkspaceTests
     }
 
     [Fact]
+    public async Task Extraction_reconstructs_spaces_between_positioned_pdf_words()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "supplier-ra-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var bytes = CreatePositionedPdf();
+            using (var rawPdf = PdfDocument.Open(new MemoryStream(bytes)))
+            {
+                var rawText = rawPdf.GetPage(1).Text;
+                Assert.Contains("reductionacross", rawText);
+                Assert.Contains("recyclingfacilities", rawText);
+                Assert.Contains("aremanagement-reported", rawText);
+                Assert.Contains("fromJanuary", rawText);
+                Assert.Contains("beenexternally", rawText);
+            }
+
+            var workspace = new EvidenceWorkspace(new TestEnvironment(folder));
+            await workspace.UploadAsync([new FormFile(new MemoryStream(bytes), 0, bytes.Length, "files", "layout.pdf")], CancellationToken.None);
+            var response = await workspace.ResearchAsync("What reductions and recycling facilities are reported from January?", new PassageCaptureGenerator(), CancellationToken.None);
+            var excerpt = Assert.Single(response.Sources).Excerpt;
+            Assert.Contains("reduction across", excerpt);
+            Assert.Contains("recycling facilities", excerpt);
+            Assert.Contains("are management-reported", excerpt);
+            Assert.Contains("from January", excerpt);
+            Assert.Contains("not been externally assured", excerpt);
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(folder, true); }
+    }
+
+    [Fact]
     public async Task Insufficient_comparison_abstains_and_explains_missing_comparable_evidence()
     {
         var folder = Path.Combine(Path.GetTempPath(), "supplier-ra-tests", Guid.NewGuid().ToString("N"));
@@ -117,6 +150,58 @@ public sealed class EvidenceWorkspaceTests
             Assert.Empty(response.Findings);
             Assert.Contains("did not support a defensible answer", Assert.Single(response.Warnings));
             Assert.Contains("comparable boundaries and reporting periods", Assert.Single(response.FollowUpQuestions));
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(folder, true); }
+    }
+
+    [Fact]
+    public async Task Partial_validation_keeps_supported_findings_and_logs_exact_rejection_rule()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "supplier-ra-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var logger = new RecordingLogger<EvidenceWorkspace>();
+            var workspace = new EvidenceWorkspace(new TestEnvironment(folder), logger);
+            await workspace.UploadAsync([PdfFile("atlas.pdf", "Atlas reports a 15% reduction in Scope 1 emissions for 2024.")], CancellationToken.None);
+
+            var response = await workspace.ResearchAsync("Summarize Atlas 15% reduction in Scope 1 emissions.", new MixedCitationGenerator(), CancellationToken.None);
+
+            Assert.Equal("partial_validation", response.Status);
+            Assert.Single(response.Findings);
+            Assert.Single(response.Findings[0].Evidence);
+            Assert.Single(response.FindingIds);
+            Assert.Contains("failed evidence validation", Assert.Single(response.Warnings));
+            Assert.Contains(logger.Entries, entry => Equals(entry.GetValueOrDefault("Rule"), "excerpt_span_not_exact_match"));
+            Assert.Contains(logger.Entries, entry => entry.ContainsKey("SelectedPassages"));
+            var loggedText = logger.Entries.SelectMany(entry => entry.Values).OfType<string>();
+            Assert.DoesNotContain(loggedText, value => value.Contains("Atlas reports", StringComparison.Ordinal) ||
+                value.Contains("This wording is absent", StringComparison.Ordinal));
+            await workspace.DecideAsync(response.FindingIds[0], "accept", "Valid citation retained.", CancellationToken.None);
+            var csv = await workspace.ExportCsvAsync(CancellationToken.None);
+            Assert.Contains("Valid citation retained", csv);
+            Assert.Contains("15% reduction", csv);
+            Assert.DoesNotContain("fell to 15%", csv);
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(folder, true); }
+    }
+
+    [Fact]
+    public async Task All_invalid_citations_fall_back_to_sources_only()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "supplier-ra-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var workspace = new EvidenceWorkspace(new TestEnvironment(folder));
+            await workspace.UploadAsync([PdfFile("atlas.pdf", "Atlas reports a 15% reduction in Scope 1 emissions for 2024.")], CancellationToken.None);
+
+            var response = await workspace.ResearchAsync("Summarize Atlas 15% reduction in Scope 1 emissions.", new AllInvalidCitationGenerator(), CancellationToken.None);
+
+            Assert.Equal("sources_only", response.Status);
+            Assert.Empty(response.Findings);
+            Assert.Single(response.Sources);
+            Assert.Contains("failed evidence validation", Assert.Single(response.Warnings));
         }
         finally { SqliteConnection.ClearAllPools(); Directory.Delete(folder, true); }
     }
@@ -168,6 +253,25 @@ public sealed class EvidenceWorkspaceTests
         return builder.Build();
     }
 
+    private static byte[] CreatePositionedPdf()
+    {
+        var builder = new PdfDocumentBuilder();
+        var font = builder.AddStandard14Font(Standard14Font.Helvetica);
+        var page = builder.AddPage(PageSize.A4);
+        var rows = new (string Text, double X)[][]
+        {
+            new[] { ("reduction", 25d), ("across", 80d) },
+            new[] { ("recycling", 25d), ("facilities", 78d) },
+            new[] { ("are", 25d), ("management-reported", 55d) },
+            new[] { ("from", 25d), ("January", 60d) },
+            new[] { ("not been", 25d), ("externally", 90d), ("assured", 155d) }
+        };
+        for (var row = 0; row < rows.Length; row++)
+            foreach (var word in rows[row])
+                page.AddText(word.Text, 12, new PdfPoint(word.X, page.PageSize.Top - 25 - row * 20), font);
+        return builder.Build();
+    }
+
     private static IFormFile PdfFile(string name, string text)
     {
         var bytes = CreatePdf(text);
@@ -211,6 +315,30 @@ public sealed class EvidenceWorkspaceTests
             ]), "mock-gemini", null));
     }
 
+    private sealed class MixedCitationGenerator : IResearchGenerator
+    {
+        public Task<GeneratedResearch> GenerateAsync(string supplier, string question, IReadOnlyList<ResearchSource> sources, CancellationToken cancellationToken)
+        {
+            var sourceId = sources[0].Id;
+            var answer = new GeneratedAnswer(
+            [
+                new GeneratedFinding("Atlas reports a 15% reduction in Scope 1 emissions.",
+                    [new GeneratedEvidence(sourceId, "15% reduction in Scope 1 emissions")]),
+                new GeneratedFinding("Atlas emissions fell to 15%.",
+                    [new GeneratedEvidence(sourceId, "Atlas emissions fell to 15%")])
+            ], []);
+            return Task.FromResult(new GeneratedResearch(answer, "mock-gemini", null));
+        }
+    }
+
+    private sealed class AllInvalidCitationGenerator : IResearchGenerator
+    {
+        public Task<GeneratedResearch> GenerateAsync(string supplier, string question, IReadOnlyList<ResearchSource> sources, CancellationToken cancellationToken) =>
+            Task.FromResult(new GeneratedResearch(new GeneratedAnswer([
+                new GeneratedFinding("Uncited claim.", [new GeneratedEvidence(sources[0].Id, "This wording is absent from the passage")])
+            ], []), "mock-gemini", null));
+    }
+
     private sealed class PassageCaptureGenerator : IResearchGenerator
     {
         public IReadOnlyList<string> Excerpts { get; private set; } = [];
@@ -224,6 +352,19 @@ public sealed class EvidenceWorkspaceTests
     private sealed class FixedTimeProvider(DateTimeOffset time) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => time;
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<Dictionary<string, object?>> Entries { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (state is IEnumerable<KeyValuePair<string, object?>> properties)
+                Entries.Add(properties.ToDictionary(property => property.Key, property => property.Value));
+        }
     }
 
     private sealed class TestEnvironment(string root) : IWebHostEnvironment

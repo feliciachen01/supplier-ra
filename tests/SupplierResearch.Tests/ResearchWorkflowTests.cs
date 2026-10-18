@@ -252,6 +252,8 @@ public sealed class ResearchWorkflowTests
         Assert.Contains("If excerpts conflict, report the claims separately", instruction);
         Assert.Contains("cross-document synthesis finding", instruction);
         Assert.Contains("never choose an overall winner without comparable evidence", instruction);
+        Assert.Contains("cite each supporting passage in a separate evidence item", instruction);
+        Assert.Contains("never combine text from different sources into one fabricated quote", instruction);
         using var generationInput = JsonDocument.Parse(payload.RootElement.GetProperty("contents")[0]
             .GetProperty("parts")[0].GetProperty("text").GetString()!);
         Assert.Equal("S3", generationInput.RootElement.GetProperty("sources")[0].GetProperty("sourceId").GetString());
