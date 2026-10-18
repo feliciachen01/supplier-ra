@@ -1,0 +1,25 @@
+# Local secrets and configuration
+.env
+.env.*
+!.env.example
+**/secrets.json
+*.pfx
+*.pem
+*.key
+
+# .NET build output
+**/bin/
+**/obj/
+TestResults/
+artifacts/
+
+# IDE files
+.vs/
+.idea/
+*.suo
+*.user
+
+# Personal resumes and interview materials
+**/*resume*
+**/*cv*
+**/*interview*
