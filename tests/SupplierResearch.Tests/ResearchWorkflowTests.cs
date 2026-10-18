@@ -47,6 +47,23 @@ public sealed class ResearchWorkflowTests
     }
 
     [Fact]
+    public async Task ResearchAsync_rejects_full_source_excerpt_when_it_exceeds_span_limit()
+    {
+        var fullExcerpt = new string('a', 301);
+        var generator = new StubGenerator(new GeneratedResearch(
+            new GeneratedAnswer(
+                [new GeneratedFinding("Supported statement", [new GeneratedEvidence("S1", fullExcerpt)])], []),
+            "gemini-test", null));
+        var result = await CreateWorkflow([new("Company", "https://example.test/source", fullExcerpt)], "live", generator)
+            .ResearchAsync("Northwind", "Find supporting information", CancellationToken.None);
+
+        Assert.Equal("sources_only", result.Status);
+        Assert.Empty(result.Findings);
+        Assert.Single(result.Sources);
+        Assert.Contains("failed evidence validation", Assert.Single(result.Warnings));
+    }
+
+    [Fact]
     public async Task ResearchAsync_falls_back_to_sources_when_generator_fails()
     {
         var generator = new StubGenerator(new ResearchGenerationException(GenerationFailureKind.UpstreamHttp,
@@ -124,6 +141,14 @@ public sealed class ResearchWorkflowTests
         using var payload = JsonDocument.Parse(requestBody!);
         Assert.Equal("application/json", payload.RootElement.GetProperty("generationConfig").GetProperty("responseMimeType").GetString());
         Assert.True(payload.RootElement.GetProperty("generationConfig").TryGetProperty("responseSchema", out _));
+        var schema = payload.RootElement.GetProperty("generationConfig").GetProperty("responseSchema");
+        var excerptDescription = schema.GetProperty("properties").GetProperty("findings").GetProperty("items")
+            .GetProperty("properties").GetProperty("evidence").GetProperty("items")
+            .GetProperty("properties").GetProperty("excerptSpan").GetProperty("description").GetString();
+        Assert.Contains("maximum 200 characters", excerptDescription);
+        var instruction = payload.RootElement.GetProperty("systemInstruction").GetProperty("parts")[0]
+            .GetProperty("text").GetString();
+        Assert.Contains("never copy the full source excerpt", instruction);
         Assert.Equal("gemini-test-version", response.Model);
         Assert.Equal(12, response.Usage!.TotalTokenCount);
     }
