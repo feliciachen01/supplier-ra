@@ -1,0 +1,64 @@
+﻿{
+    "presetId":  "tetra-pak-recycling",
+    "capturedAt":  "2026-10-18T06:52:41.2194456+00:00",
+    "mode":  "saved_example",
+    "notice":  "Saved research — generated 2026-10-18. No live API request.",
+    "research":  {
+                     "supplier":  "Tetra Pak",
+                     "question":  "Research public reports of Tetra Pak packaging recycling practices, including collection and recycling initiatives, geographic or program scope, and reported limitations. Include only claims supported by source excerpts.",
+                     "mode":  "live",
+                     "status":  "sources_only",
+                     "findings":  [
+
+                                  ],
+                     "followUpQuestions":  [
+
+                                           ],
+                     "sources":  [
+                                     {
+                                         "id":  "S1",
+                                         "title":  "Tetra Pak Sustainability Report FY22 Collection \u0026 Recycling",
+                                         "url":  "https://www.3blmedia.com/news/tetra-pak-sustainability-report-fy22-collection-recycling",
+                                         "excerpt":  "Tetra Pak logo\n\n### More from Tetra Pak\n\n###### Tetra Pak Earns Ecovadis Sustainability Platinum Medal for Second Consecutive Year\n\nOct 13, 2026 9:45 AM ET\n\n###### Tetra Pak To Showcase Latest Packaging Innovations and Ultrafiltration Expertise at PACK EXPO International 2026\n\nOct 7, 2026 1:00 PM ET\n\n###### Tetra Pak Unveils Progress Toward More Resilient Food Systems in U.S. and Canada\n\nSep 1, 2026 9:00 AM ET",
+                                         "provenance":  "provider_excerpt"
+                                     },
+                                     {
+                                         "id":  "S2",
+                                         "title":  "Tetra Pak global news archive, news and press releases | Tetra Pak United States of America",
+                                         "url":  "https://www.tetrapak.com/en-us/about-tetra-pak/news-and-events/newsarchive",
+                                         "excerpt":  "2026-08-17\n\n#### Tetra Pak U.S. and Canada Releases FY25 Sustainability Report\n\n#### Tetra Pak U.S. and Canada Releases FY25 Sustainability Report\n\nLocal supplement showcases advances in food production, carton recycling, emissions reductions and community impact across the U.S. and Canada.\n\nRead more about ⁠\n\ntetra recart tuna \n\n2026-06-17\n\n#### New Tetra Recart® solution for tuna\n\n#### New Tetra Recart® solution for tuna",
+                                         "provenance":  "provider_excerpt"
+                                     },
+                                     {
+                                         "id":  "S3",
+                                         "title":  "Eco Boost: India Now Recycles 48% of Carton Packaging, Says Tetra Pak - TERI report",
+                                         "url":  "https://www.youtube.com/watch?v=k1emj9oV-yk",
+                                         "excerpt":  "[4:20] important is not only about the packaging. Sustainability is about protecting protecting food, people and\n[4:27] the planet. Right? This is in our motto and that is what drives all the employees in Tetraac. Right? So when we\n[4:34] come to the new country we always think about this one right. So at that time we already started to contact and started\n[4:42] to build up the collection and recycling value chain started to work with the partners that could really value the",
+                                         "provenance":  "provider_excerpt"
+                                     },
+                                     {
+                                         "id":  "S4",
+                                         "title":  "Sustainability performance data | Tetra Pak United States of America",
+                                         "url":  "https://www.tetrapak.com/en-us/sustainability/measuring-and-impact/sustainability-performance-data",
+                                         "excerpt":  "Our cartons are recyclable where collection, sorting and recycling infrastructure exists at scale. By increasing the fibre content and reducing the plastics and aluminium, our packaging becomes more attractive to paper mills and fibre recycles, and easier to recycle.\n\nMaterials used for packaging and additional material  \n Relative proportion of materials used for packaging and additional material\\\n\n\\Excluding tab strips, liners and hotmelts",
+                                         "provenance":  "provider_excerpt"
+                                     },
+                                     {
+                                         "id":  "S5",
+                                         "title":  "Evaluating the Sustainability of Tetra Pak Smart Packaging Through Life Cycle and Economic Analysis",
+                                         "url":  "https://www.mdpi.com/2071-1050/17/11/4810",
+                                         "excerpt":  "The end of life of the Tetra Pak packaging refers to 26% recycling , 29.6% incineration and 46.4% landfilling. When recycling, the majority of Tetra Pak recycling plants (97 out of 170)  effectively recycle the 75% of the packaging, which represents the paper fraction. This process yields paper fibers, at a rate of 80% of the paper mass that are used to produce paper products other than packaging . From 1 kg of packaging destined for recycling, 0.60 kg of paper fibers are produced, while the",
+                                         "provenance":  "provider_excerpt"
+                                     }
+                                 ],
+                     "warnings":  [
+                                      "Structured output failed evidence validation; showing provider excerpts only."
+                                  ],
+                     "model":  "gemini-3.1-flash-lite",
+                     "usage":  {
+                                   "promptTokenCount":  971,
+                                   "candidateTokenCount":  351,
+                                   "totalTokenCount":  1322
+                               }
+                 }
+}

@@ -8,8 +8,8 @@ public static class ResearchPresets
     [
         new("tetra-pak-sustainability", "Tetra Pak sustainability", "Tetra Pak",
             "Find public company and sustainability information", false),
-        new("northwind-packaging", "Northwind Packaging", "Northwind Packaging",
-            "Find public company and sustainability information", true)
+        new("tetra-pak-recycling", "Tetra Pak packaging recycling", "Tetra Pak",
+            "Research public reports of Tetra Pak packaging recycling practices", true)
     ];
 
     public static bool TryGet(string id, out ResearchPreset preset)
