@@ -31,7 +31,14 @@ The single GitHub Actions workflow runs the test suite and builds the image on p
 
 ## Manual Azure deployment
 
-The existing app is `sra-m0-quickstart-20261017` in resource group `rg-supplier-ra-m0-20261017` (Canada Central). Keep its current min/max replica settings (0/1). No other Azure resources are required. A successful `main` workflow publishes the commit-tagged image to a **private** GitHub Container Registry package linked to this repository. Azure needs a GitHub classic PAT with `read:packages` to pull that private image. Configure that credential in the Container App's Registries settings without putting the token in a command, file, or chat. Then update the existing app to the image tagged with the reviewed commit SHA. Do not enable hosted live calls or add Azure/GitHub deployment automation.
+The existing app is `sra-m0-quickstart-20261017` in resource group `rg-supplier-ra-m0-20261017` (Canada Central). Keep its current min/max replica settings (0/1). No other Azure resources are required. A successful `main` workflow publishes the commit-tagged image to a **private** GitHub Container Registry package linked to this repository. Azure needs a GitHub classic PAT with `read:packages` to pull that private image. Configure that credential in the Container App's Registries settings without putting the token in a command, file, or chat. Then update the existing app to the reviewed image:
+
+```powershell
+$image = 'ghcr.io/feliciachen01/supplier-ra:83e2aa1282f58749768971b889b2b1d7dfb332bc'
+& 'C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd' containerapp update --resource-group rg-supplier-ra-m0-20261017 --name sra-m0-quickstart-20261017 --image $image
+```
+
+Do not enable hosted live calls or add Azure/GitHub deployment automation.
 
 Verify `/health`, `/`, `/api/demo/presets`, `POST /api/demo/tetra-pak-sustainability`, `POST /api/research`, and `/api/examples/northwind-packaging`. Hosted mode should return healthy/page content, live preset requests should be disabled, and arbitrary research should return 404. The saved example is a dated, explicitly synthetic illustration, not a live result.
 
