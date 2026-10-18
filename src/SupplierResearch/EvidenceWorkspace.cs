@@ -2,17 +2,20 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using UglyToad.PdfPig;
 
 namespace SupplierResearch;
 
 public sealed record WorkspacePassage(string Id, string DocumentId, string Name, int Page, string Text);
 
-public sealed class EvidenceWorkspace(IWebHostEnvironment environment)
+public sealed class EvidenceWorkspace(IWebHostEnvironment environment, ILogger<EvidenceWorkspace>? logger = null)
 {
     private const long MaxFileBytes = 5 * 1024 * 1024;
     private const int MaxPassages = 500;
     private const int MaxRetrieved = 12;
+    private readonly ILogger<EvidenceWorkspace> _logger = logger ?? NullLogger<EvidenceWorkspace>.Instance;
     private readonly string _connectionString = CreateDatabase(environment);
 
     public static long FileLimit => MaxFileBytes;
@@ -115,22 +118,43 @@ public sealed class EvidenceWorkspace(IWebHostEnvironment environment)
         cmd.CommandText = "SELECT p.id,p.document_id,d.name,p.page,p.text FROM passages p JOIN documents d ON d.id=p.document_id";
         await using (var r = await cmd.ExecuteReaderAsync(token))
             while (await r.ReadAsync(token)) passages.Add(new(r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt32(3), r.GetString(4)));
-        var terms = Regex.Matches(question.ToLowerInvariant(), @"[\p{L}\p{N}]{3,}").Select(m => m.Value).Distinct().ToArray();
-        var retrieved = passages.Select(p => (Passage: p, Score: terms.Sum(t => Regex.Matches(p.Text.ToLowerInvariant(), $@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(t)}(?![\p{{L}}\p{{N}}])").Count)))
-            .Where(x => x.Score > 0).OrderByDescending(x => x.Score).ThenBy(x => x.Passage.Id, StringComparer.Ordinal).Take(MaxRetrieved).Select(x => x.Passage).ToArray();
+        var terms = Regex.Matches(question.ToLowerInvariant(), @"[\p{L}\p{N}]{2,}").Select(m => m.Value).Distinct().ToArray();
+        var ranked = passages.Select(p => (Passage: p, Score: terms.Sum(t => Regex.Matches(p.Text.ToLowerInvariant(), $@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(t)}(?![\p{{L}}\p{{N}}])").Count)))
+            .Where(x => x.Score > 0).OrderByDescending(x => x.Score).ThenBy(x => x.Passage.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.Passage.Page).ThenBy(x => x.Passage.Id, StringComparer.Ordinal).Take(MaxRetrieved).ToArray();
+        var retrieved = ranked.Select(x => x.Passage).ToArray();
         var sources = retrieved.Select((p, i) => new ResearchSource(p.Id, $"{p.Name}, page {p.Page}", $"https://evidence.local/{p.DocumentId}/{p.Page}", p.Text, "uploaded_pdf_passage")).ToArray();
+        _logger.LogInformation("PDF research retrieval: {Status} {PassageCount} {SelectedPassages}",
+            sources.Length == 0 ? "insufficient_evidence" : "retrieved",
+            passages.Count, ranked.Select(x => new { PassageId = x.Passage.Id, x.Passage.DocumentId, x.Passage.Page, x.Score }).ToArray());
         GeneratedResearch? generated = null; var findings = (IReadOnlyList<ResearchFinding>)Array.Empty<ResearchFinding>();
-        var followups = (IReadOnlyList<string>)Array.Empty<string>(); var warnings = Array.Empty<string>(); string status;
+        var followups = (IReadOnlyList<string>)Array.Empty<string>(); IReadOnlyList<string> warnings = Array.Empty<string>(); string status;
         if (sources.Length == 0) status = "insufficient_evidence";
         else
         {
             try { generated = await generator.GenerateAsync("Uploaded documents", question, sources, token); }
             catch (ResearchGenerationException ex) when (ex.Kind == GenerationFailureKind.Cancelled) { throw new OperationCanceledException(token); }
-            catch (ResearchGenerationException ex) when (ex.Kind != GenerationFailureKind.Cancelled) { warnings = ["Generation unavailable; retrieved passages are shown without findings."]; }
+            catch (ResearchGenerationException ex) when (ex.Kind != GenerationFailureKind.Cancelled)
+            {
+                _logger.LogWarning("PDF research generation failed: {FailureKind} {StatusCode}", ex.Kind,
+                    ex.StatusCode is null ? null : (int)ex.StatusCode.Value);
+                warnings = ["Generation unavailable; retrieved passages are shown without findings."];
+            }
             if (generated is not null)
             {
-                if (ResearchWorkflow.TryValidate(generated.Answer, sources, out findings, out followups, out _)) status = findings.Count == 0 ? "insufficient_evidence" : "complete";
-                else { findings = []; warnings = ["Generated citations failed evidence validation; retrieved passages are shown without findings."]; status = "sources_only"; }
+                if (ResearchWorkflow.TryValidate(generated.Answer, sources, out findings, out followups, out var failure))
+                {
+                    status = findings.Count == 0 ? "insufficient_evidence" : "complete";
+                    if (findings.Count == 0)
+                        warnings = ["The retrieved evidence did not support a defensible answer to this question; no finding was generated."];
+                }
+                else
+                {
+                    _logger.LogWarning("PDF research validation rejected output: {Rule} {FindingIndex} {EvidenceIndex} {SourceId} {AvailableSourceIds} {ExcerptSpanLength} {SourceExcerptLength}",
+                        failure!.Rule, failure.FindingIndex, failure.EvidenceIndex, failure.SourceId,
+                        failure.AvailableSourceIds, failure.ExcerptSpanLength, failure.SourceExcerptLength);
+                    findings = []; warnings = ["Generated citations failed evidence validation; retrieved passages are shown without findings."]; status = "sources_only";
+                }
             }
             else status = "sources_only";
         }
@@ -146,6 +170,8 @@ public sealed class EvidenceWorkspace(IWebHostEnvironment environment)
             fi.Parameters.AddWithValue("$run", runId); fi.Parameters.AddWithValue("$text", f.Text);
             fi.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(f.Evidence)); await fi.ExecuteNonQueryAsync(token);
         }
+        _logger.LogInformation("PDF research request completed: {RunId} {Status} {RetrievedPassageCount} {FindingCount}",
+            runId, status, sources.Length, findings.Count);
         return new ResearchResponse("Uploaded documents", question, "documents", status, findings, followups, sources, warnings, generated?.Model, generated?.Usage)
         { RunId = runId, FindingIds = findingIds };
     }

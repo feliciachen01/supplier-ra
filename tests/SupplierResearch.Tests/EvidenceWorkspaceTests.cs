@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.FileProviders;
-using Microsoft.Extensions.Logging.Abstractions;
 using SupplierResearch;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Core;
@@ -35,6 +34,7 @@ public sealed class EvidenceWorkspaceTests
             Assert.Equal("complete", response.Status);
             Assert.Single(response.Sources);
             Assert.Contains("page 1", response.Sources[0].Title);
+            Assert.Contains("Product includes 42% recycled content.", response.Sources[0].Excerpt);
             Assert.Equal(response.Sources[0].Id, response.Findings[0].Evidence[0].SourceId);
             Assert.Single(response.FindingIds);
 
@@ -44,6 +44,100 @@ public sealed class EvidenceWorkspaceTests
             Assert.Contains("42% recycled", csv);
         }
         finally { SqliteConnection.ClearAllPools(); Directory.Delete(folder, true); }
+    }
+
+    [Fact]
+    public async Task Comparison_retrieves_two_digit_metric_and_qualifications_and_persists_synthesis()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "supplier-ra-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var workspace = new EvidenceWorkspace(new TestEnvironment(folder));
+            await workspace.UploadAsync(
+            [
+                PdfFile("atlas-results.pdf", "Atlas reports a 15% reduction in Scope 1 emissions for 2024."),
+                PdfFile("atlas-boundary.pdf", "The reporting limitations are clear: this metric excludes supplier emissions and covers company-operated sites only.")
+            ], CancellationToken.None);
+
+            var generator = new ComparisonGenerator();
+            var response = await workspace.ResearchAsync("Compare Atlas 15% reduction and reporting limitations across documents.", generator, CancellationToken.None);
+
+            Assert.Equal("complete", response.Status);
+            Assert.Equal(2, response.Sources.Count);
+            Assert.Contains(response.Sources, source => source.Excerpt.Contains("15% reduction", StringComparison.Ordinal));
+            Assert.Contains(response.Sources, source => source.Excerpt.Contains("excludes supplier emissions", StringComparison.Ordinal));
+            var synthesis = Assert.Single(response.Findings);
+            Assert.Contains("while", synthesis.Text);
+            Assert.Equal(2, synthesis.Evidence.Count);
+            Assert.NotEqual(synthesis.Evidence[0].SourceId, synthesis.Evidence[1].SourceId);
+
+            await workspace.DecideAsync(response.FindingIds[0], "accept", "Compared both report pages.", CancellationToken.None);
+            var csv = await workspace.ExportCsvAsync(CancellationToken.None);
+            Assert.Contains("Compared both report pages", csv);
+            Assert.Contains("15% reduction", csv);
+            Assert.Contains("excludes supplier emissions", csv);
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(folder, true); }
+    }
+
+    [Fact]
+    public async Task Retrieval_matches_two_digit_percent_when_it_is_the_only_shared_term()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "supplier-ra-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var workspace = new EvidenceWorkspace(new TestEnvironment(folder));
+            await workspace.UploadAsync([PdfFile("metric.pdf", "The metric changed by 15%.")], CancellationToken.None);
+            var generator = new PassageCaptureGenerator();
+
+            var response = await workspace.ResearchAsync("What is the 15% figure?", generator, CancellationToken.None);
+
+            Assert.Single(response.Sources);
+            Assert.Contains("15%", Assert.Single(generator.Excerpts));
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(folder, true); }
+    }
+
+    [Fact]
+    public async Task Insufficient_comparison_abstains_and_explains_missing_comparable_evidence()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "supplier-ra-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var workspace = new EvidenceWorkspace(new TestEnvironment(folder));
+            await workspace.UploadAsync([PdfFile("atlas.pdf", "Atlas reports a 15% reduction in Scope 1 emissions for 2024.")], CancellationToken.None);
+            var generator = new AbstainingGenerator();
+
+            var response = await workspace.ResearchAsync("Which company is more sustainable based on Atlas 15% reduction?", generator, CancellationToken.None);
+
+            Assert.Equal("insufficient_evidence", response.Status);
+            Assert.Empty(response.Findings);
+            Assert.Contains("did not support a defensible answer", Assert.Single(response.Warnings));
+            Assert.Contains("comparable boundaries and reporting periods", Assert.Single(response.FollowUpQuestions));
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(folder, true); }
+    }
+
+    [Fact]
+    public void Pdf_generation_gate_is_independent_from_web_research_gate()
+    {
+        var clock = new FixedTimeProvider(DateTimeOffset.Parse("2026-10-18T00:00:00Z"));
+        var webGate = new LiveRequestGate(clock);
+        var pdfGate = new EvidenceResearchGate(clock);
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.True(webGate.TryAcquire(out var webLease, out _));
+            webLease!.Dispose();
+        }
+        Assert.False(webGate.TryAcquire(out _, out var failure));
+        Assert.Equal(LiveAdmissionFailure.RateLimit, failure);
+        Assert.True(pdfGate.TryAcquire(out var pdfLease, out _));
+        pdfLease!.Dispose();
+        var rejected = ResearchEndpointHelpers.AdmissionRejected(LiveAdmissionFailure.RateLimit, "PDF research");
+        Assert.Contains("pdf research", Assert.IsType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>(rejected).ProblemDetails!.Title, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -74,6 +168,12 @@ public sealed class EvidenceWorkspaceTests
         return builder.Build();
     }
 
+    private static IFormFile PdfFile(string name, string text)
+    {
+        var bytes = CreatePdf(text);
+        return new FormFile(new MemoryStream(bytes), 0, bytes.Length, "files", name);
+    }
+
     private sealed class ExactQuoteGenerator : IResearchGenerator
     {
         public Task<GeneratedResearch> GenerateAsync(string supplier, string question, IReadOnlyList<ResearchSource> sources, CancellationToken cancellationToken)
@@ -83,6 +183,47 @@ public sealed class EvidenceWorkspaceTests
             return Task.FromResult(new GeneratedResearch(new GeneratedAnswer(
                 [new GeneratedFinding("The product includes 42% recycled content.", [new GeneratedEvidence(source.Id, quote)])], []), "fixture", null));
         }
+    }
+
+    private sealed class ComparisonGenerator : IResearchGenerator
+    {
+        public Task<GeneratedResearch> GenerateAsync(string supplier, string question, IReadOnlyList<ResearchSource> sources, CancellationToken cancellationToken)
+        {
+            var metric = sources.Single(source => source.Excerpt.Contains("15% reduction", StringComparison.Ordinal));
+            var boundary = sources.Single(source => source.Excerpt.Contains("excludes supplier emissions", StringComparison.Ordinal));
+            var answer = new GeneratedAnswer(
+            [
+                new GeneratedFinding("Atlas reports a 15% Scope 1 reduction for 2024, while its reported boundary excludes supplier emissions and covers company-operated sites.",
+                [
+                    new GeneratedEvidence(metric.Id, "15% reduction in Scope 1 emissions for 2024"),
+                    new GeneratedEvidence(boundary.Id, "excludes supplier emissions and covers company-operated sites only")
+                ])
+            ], []);
+            return Task.FromResult(new GeneratedResearch(answer, "mock-gemini", null));
+        }
+    }
+
+    private sealed class AbstainingGenerator : IResearchGenerator
+    {
+        public Task<GeneratedResearch> GenerateAsync(string supplier, string question, IReadOnlyList<ResearchSource> sources, CancellationToken cancellationToken) =>
+            Task.FromResult(new GeneratedResearch(new GeneratedAnswer([], [
+                "The excerpts do not provide comparable boundaries and reporting periods for an overall sustainability ranking."
+            ]), "mock-gemini", null));
+    }
+
+    private sealed class PassageCaptureGenerator : IResearchGenerator
+    {
+        public IReadOnlyList<string> Excerpts { get; private set; } = [];
+        public Task<GeneratedResearch> GenerateAsync(string supplier, string question, IReadOnlyList<ResearchSource> sources, CancellationToken cancellationToken)
+        {
+            Excerpts = sources.Select(source => source.Excerpt).ToArray();
+            return Task.FromResult(new GeneratedResearch(new GeneratedAnswer([], []), "mock-gemini", null));
+        }
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset time) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => time;
     }
 
     private sealed class TestEnvironment(string root) : IWebHostEnvironment

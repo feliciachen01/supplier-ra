@@ -50,6 +50,7 @@ else
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<LiveRequestGate>();
+builder.Services.AddSingleton<EvidenceResearchGate>();
 builder.Services.AddSingleton<SupplierSearchService>();
 builder.Services.AddHttpClient<IResearchGenerator, GeminiResearchGenerator>(client =>
 {
@@ -99,12 +100,12 @@ else
     }).DisableAntiforgery();
     app.MapGet("/api/workspace/documents", async (EvidenceWorkspace workspace, CancellationToken token) => Results.Ok(await workspace.ListDocumentsAsync(token)));
     app.MapPost("/api/workspace/research", async (WorkspaceResearchRequest input, HttpContext context, EvidenceWorkspace workspace,
-        IResearchGenerator generator, LiveRequestGate gate, IConfiguration configuration, CancellationToken token) =>
+        IResearchGenerator generator, EvidenceResearchGate gate, IConfiguration configuration, CancellationToken token) =>
     {
         if (input.Question is null || input.Question.Trim().Length is < 10 or > 500) return Results.BadRequest(new { title = "Question must be 10-500 characters." });
         if (!string.IsNullOrWhiteSpace(configuration["GEMINI_API_KEY"]))
         {
-            if (!gate.TryAcquire(out var lease, out var failure)) return ResearchEndpointHelpers.AdmissionRejected(failure);
+            if (!gate.TryAcquire(out var lease, out var failure)) return ResearchEndpointHelpers.AdmissionRejected(failure, "PDF research");
             using (lease) return await ResearchEndpoints.ExecuteWithDeadlineAsync(context,
                 ct => workspace.ResearchAsync(input.Question.Trim(), generator, ct), token);
         }

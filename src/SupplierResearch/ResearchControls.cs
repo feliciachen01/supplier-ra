@@ -91,6 +91,14 @@ public sealed class LiveRequestGate(TimeProvider timeProvider)
     }
 }
 
+public sealed class EvidenceResearchGate(TimeProvider timeProvider)
+{
+    private readonly LiveRequestGate gate = new(timeProvider);
+
+    public bool TryAcquire(out IDisposable? lease, out LiveAdmissionFailure failure) =>
+        gate.TryAcquire(out lease, out failure);
+}
+
 public static class ResearchEndpointHelpers
 {
     public static async Task<bool> HasRequestOverridesAsync(HttpRequest request, CancellationToken cancellationToken)
@@ -109,11 +117,11 @@ public static class ResearchEndpointHelpers
         return await request.Body.ReadAsync(firstByte, cancellationToken) != 0;
     }
 
-    public static IResult AdmissionRejected(LiveAdmissionFailure failure) =>
+    public static IResult AdmissionRejected(LiveAdmissionFailure failure, string requestName = "Live research") =>
         failure == LiveAdmissionFailure.ConcurrentRequest
             ? Results.Problem(statusCode: StatusCodes.Status429TooManyRequests,
-                title: "A live research request is already in progress.")
+                title: $"A {requestName.ToLowerInvariant()} request is already in progress.")
             : Results.Problem(statusCode: StatusCodes.Status429TooManyRequests,
-                title: "The live research request limit has been reached.");
+                title: $"The {requestName.ToLowerInvariant()} request limit has been reached.");
 
 }

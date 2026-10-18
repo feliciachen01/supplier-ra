@@ -250,6 +250,8 @@ public sealed class ResearchWorkflowTests
         Assert.Contains("Preserve each source's qualifications and scope", instruction);
         Assert.Contains("do not add absolute or exclusive wording such as 'only'", instruction);
         Assert.Contains("If excerpts conflict, report the claims separately", instruction);
+        Assert.Contains("cross-document synthesis finding", instruction);
+        Assert.Contains("never choose an overall winner without comparable evidence", instruction);
         using var generationInput = JsonDocument.Parse(payload.RootElement.GetProperty("contents")[0]
             .GetProperty("parts")[0].GetProperty("text").GetString()!);
         Assert.Equal("S3", generationInput.RootElement.GetProperty("sources")[0].GetProperty("sourceId").GetString());

@@ -171,7 +171,10 @@ public sealed class GeminiResearchGenerator(
             "Preserve capitalization, punctuation, spacing, and Unicode exactly. Target 8 to 20 words and at most 200 characters; never copy the full source excerpt or a full paragraph. " +
             "Preserve each source's qualifications and scope; do not add absolute or exclusive wording such as 'only' unless the cited excerpt explicitly supports it. " +
             "If excerpts conflict, report the claims separately with their own source IDs and state that they conflict; do not resolve them without evidence. " +
-            "If evidence is insufficient, return no findings. Add up to 3 useful follow-up questions only when they make sense, and do not assume unsupported facts.";
+            "When the question asks to compare documents, include a concise cross-document synthesis finding when retrieved excerpts support a meaningful comparison, citing every excerpt used. " +
+            "Keep non-comparable dimensions separate and never choose an overall winner without comparable evidence for that conclusion. " +
+            "If evidence is insufficient, return no findings and use a follow-up question to state what comparison evidence is missing when the excerpts establish that gap. " +
+            "Add up to 3 useful follow-up questions only when they make sense, and do not assume unsupported facts.";
 
         var evidence = sources.Select(source => new { sourceId = source.Id, source.Title, source.Excerpt });
         var input = JsonSerializer.Serialize(new { supplier, question, sources = evidence }, JsonOptions);
