@@ -17,7 +17,11 @@ public sealed record ResearchResponse(
     IReadOnlyList<ResearchSource> Sources,
     IReadOnlyList<string> Warnings,
     string? Model,
-    ProviderUsage? Usage);
+    ProviderUsage? Usage)
+{
+    public string? RunId { get; init; }
+    public IReadOnlyList<string> FindingIds { get; init; } = [];
+}
 
 public sealed record ResearchValidationFailure(
     string Rule,
@@ -354,7 +358,7 @@ public sealed class ResearchWorkflow(
         ProviderUsage? usage) =>
         new(supplier, question, searchProvider.Mode, status, findings, followUpQuestions, sources, warnings, model, usage);
 
-    private static bool TryValidate(
+    internal static bool TryValidate(
         GeneratedAnswer? answer,
         IReadOnlyList<ResearchSource> sources,
         out IReadOnlyList<ResearchFinding> findings,

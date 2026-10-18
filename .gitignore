@@ -12,6 +12,8 @@
 **/obj/
 TestResults/
 artifacts/
+App_Data/
+**/evidence-workspace.sqlite3*
 
 # IDE files
 .vs/
