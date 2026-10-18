@@ -226,7 +226,10 @@ public sealed class ResearchWorkflowTests
         }).Build();
         var generator = new GeminiResearchGenerator(client, configuration, NullLogger<GeminiResearchGenerator>.Instance);
 
-        var response = await generator.GenerateAsync("Northwind", "Find public information", [], CancellationToken.None);
+        var source = new ResearchSource("S3", "Packaging recycling", "https://example.test/s3",
+            "Our cartons are recyclable where collection, sorting and recycling infrastructure exists at scale. By increasing the fibre content and reducing the plastics and aluminium, our packaging becomes more attractive to paper mills and fibre recycles, and easier to recycle.",
+            "provider_excerpt");
+        var response = await generator.GenerateAsync("Tetra Pak", "Research packaging recycling practices", [source], CancellationToken.None);
 
         Assert.Equal(HttpMethod.Post, method);
         Assert.Equal("generativelanguage.googleapis.com", uri!.Host);
@@ -244,7 +247,14 @@ public sealed class ResearchWorkflowTests
         var instruction = payload.RootElement.GetProperty("systemInstruction").GetProperty("parts")[0]
             .GetProperty("text").GetString();
         Assert.Contains("never copy the full source excerpt", instruction);
+        Assert.Contains("Preserve each source's qualifications and scope", instruction);
+        Assert.Contains("do not add absolute or exclusive wording such as 'only'", instruction);
         Assert.Contains("If excerpts conflict, report the claims separately", instruction);
+        using var generationInput = JsonDocument.Parse(payload.RootElement.GetProperty("contents")[0]
+            .GetProperty("parts")[0].GetProperty("text").GetString()!);
+        Assert.Equal("S3", generationInput.RootElement.GetProperty("sources")[0].GetProperty("sourceId").GetString());
+        Assert.Contains("recyclable where collection, sorting and recycling infrastructure exists at scale",
+            generationInput.RootElement.GetProperty("sources")[0].GetProperty("excerpt").GetString());
         Assert.Equal("gemini-test-version", response.Model);
         Assert.Equal(12, response.Usage!.TotalTokenCount);
     }

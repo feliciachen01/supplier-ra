@@ -165,6 +165,7 @@ public sealed class GeminiResearchGenerator(
             "Do not use tools or outside knowledge. Return only the requested JSON. Make 1 to 5 narrow findings only when the excerpts support them. " +
             "For each finding, cite one source ID exactly as provided and copy one short, contiguous excerpt span verbatim from that source. " +
             "Preserve capitalization, punctuation, spacing, and Unicode exactly. Target 8 to 20 words and at most 200 characters; never copy the full source excerpt or a full paragraph. " +
+            "Preserve each source's qualifications and scope; do not add absolute or exclusive wording such as 'only' unless the cited excerpt explicitly supports it. " +
             "If excerpts conflict, report the claims separately with their own source IDs and state that they conflict; do not resolve them without evidence. " +
             "If evidence is insufficient, return no findings. Add up to 3 useful follow-up questions only when they make sense, and do not assume unsupported facts.";
 
