@@ -1,6 +1,6 @@
 # Supplier Research Assistant
 
-Search public supplier information, return bounded provider excerpts, and generate attributed findings locally. Excerpts are not independently verified original pages. Hosted live calls are disabled.
+Research supplier information or local PDF evidence. PDF findings cite extracted page passages and are validated against retrieved text; citations do not prove factual correctness. Hosted live calls are disabled.
 
 ## Run locally
 
@@ -17,6 +17,8 @@ Remove-Item Env:\Search__Mode
 ```
 
 Store `GEMINI_API_KEY` in the same User Secrets store to enable structured findings. Never put key values in commands, files, browser code, or chat. The temporary M0 probe's secrets are not shared with this application.
+
+In the same local app, upload up to three text-based PDFs (5 MB and 200 pages each), enter a research question, inspect the retrieved passages, and accept, reject, or flag each generated finding. Scanned image PDFs are not OCR processed. Uploads, extracted text, findings, and review decisions are stored in `src/SupplierResearch/App_Data/evidence-workspace.sqlite3`, which is excluded from Git and is not served as static content. Local PDF research uses Gemini when `GEMINI_API_KEY` is set; without it, the app shows retrieved passages only. The local Gemini path observes the same process limits (one concurrent request, three per minute, twenty per process lifetime). Use the CSV link to export reviewed findings.
 
 ## Check and container
 

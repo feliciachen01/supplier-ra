@@ -30,6 +30,22 @@
       <p>These are provider excerpts; no validated AI findings were produced.</p>
       <button id="load-example" type="button">Show Tetra Pak packaging recycling</button>
     </section>
+    <section id="workspace" hidden aria-label="Evidence research workspace">
+      <h2>Evidence workspace</h2>
+      <p>Upload up to 3 text based PDFs (5 MB each). Documents stay in this local app's private data folder.</p>
+      <form id="upload-form">
+        <label for="pdfs">PDF documents</label>
+        <input id="pdfs" name="files" type="file" accept="application/pdf,.pdf" multiple required>
+        <button type="submit">Upload PDFs</button>
+      </form>
+      <div id="documents"></div>
+      <form id="workspace-form">
+        <label for="workspace-question">Research question</label>
+        <textarea id="workspace-question" minlength="10" maxlength="500" required></textarea>
+        <button type="submit">Find evidence and draft findings</button>
+      </form>
+      <a href="/api/workspace/export.csv">Export reviewed findings as CSV</a>
+    </section>
     <p id="status" role="status" aria-live="polite"></p>
     <section id="results" aria-label="Search sources"></section>
   </main>
@@ -158,6 +174,46 @@
     status.textContent = 'Application mode is unavailable; live actions are disabled.';
   });
   document.querySelector('#load-example').click();
+
+  const workspace = document.querySelector('#workspace');
+  const documents = document.querySelector('#documents');
+  async function loadDocuments() {
+    const rows = await request('/api/workspace/documents');
+    documents.replaceChildren();
+    for (const row of rows) {
+      const p = document.createElement('p'); p.textContent = `${row.name} · added ${row.created.slice(0, 10)}`; documents.append(p);
+    }
+  }
+  document.querySelector('#upload-form').addEventListener('submit', async (event) => {
+    event.preventDefault(); status.textContent = 'Extracting PDF text...';
+    try {
+      const files = document.querySelector('#pdfs').files;
+      if (!files.length || files.length > 3 || [...files].some(file => file.size > 5 * 1024 * 1024 || !file.name.toLowerCase().endsWith('.pdf'))) throw new Error('Choose up to 3 PDF files, each no larger than 5 MB.');
+      const data = new FormData(); for (const file of files) data.append('files', file);
+      await request('/api/workspace/documents', { method: 'POST', body: data });
+      await loadDocuments(); status.textContent = 'PDFs extracted and stored locally.';
+    } catch (error) { status.textContent = error instanceof Error ? error.message : 'PDF upload failed.'; }
+  });
+  document.querySelector('#workspace-form').addEventListener('submit', async (event) => {
+    event.preventDefault(); status.textContent = 'Retrieving passages and drafting findings...';
+    try {
+      const data = await request('/api/workspace/research', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: document.querySelector('#workspace-question').value }) });
+      results.replaceChildren(); status.textContent = `${data.status.replaceAll('_', ' ')} · ${data.sources.length} retrieved passage(s). Citations identify supporting text; they do not establish factual accuracy.`;
+      for (const warning of data.warnings || []) { const p = document.createElement('p'); p.className = 'notice'; p.textContent = warning; results.append(p); }
+      const passages = new Map((data.sources || []).map(source => [source.id, source]));
+      for (let i = 0; i < (data.findings || []).length; i++) {
+        const finding = data.findings[i], card = document.createElement('article'), p = document.createElement('p'); p.textContent = finding.text; card.append(p);
+        for (const evidence of finding.evidence || []) { const quote = document.createElement('blockquote'), source = passages.get(evidence.sourceId); quote.textContent = `${source?.title || evidence.sourceId} (${source?.provenance || 'PDF passage'}): “${evidence.excerptSpan}”`; card.append(quote); }
+        const findingId = data.findingIds[i];
+        for (const decision of ['accept', 'reject', 'flag']) { const button = document.createElement('button'); button.type = 'button'; button.textContent = decision[0].toUpperCase() + decision.slice(1); button.style.width = 'auto'; button.addEventListener('click', async () => { try { await request(`/api/workspace/findings/${findingId}/review`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision, note: '' }) }); status.textContent = `Finding ${decision}ed.`; } catch (error) { status.textContent = error.message; } }); card.append(button); }
+        results.append(card);
+      }
+      const heading = document.createElement('h2'); heading.textContent = 'Retrieved evidence'; results.append(heading);
+      for (const source of data.sources || []) { const card = document.createElement('article'), title = document.createElement('h3'), quote = document.createElement('p'), meta = document.createElement('p'); title.textContent = source.title; quote.textContent = source.excerpt; meta.className = 'provenance'; meta.textContent = `Document ${source.url.split('/')[3]} · passage ${source.id}`; card.append(title, quote, meta); results.append(card); }
+      for (const question of data.followUpQuestions || []) { const p = document.createElement('p'); p.textContent = `Follow-up: ${question}`; results.append(p); }
+    } catch (error) { status.textContent = error instanceof Error ? error.message : 'Research failed.'; }
+  });
+  request('/api/demo/presets').then(config => { if (config.mode === 'local') { workspace.hidden = false; loadDocuments().catch(() => {}); } }).catch(() => {});
 </script>
 </body>
 </html>
